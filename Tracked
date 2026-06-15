@@ -1,0 +1,397 @@
+import React, { useState, useEffect, useMemo } from "react";
+
+const SECTION_META = {
+  Body:   { color: "#E8B04B", label: "Body" },
+  Mind:   { color: "#7CA9D6", label: "Mind" },
+  Work:   { color: "#C97B5A", label: "Work" },
+  Social: { color: "#8FB996", label: "Social" },
+  Care:   { color: "#C58FB9", label: "Self-Care" },
+};
+
+const DEFAULT_HABITS = [
+  { id: "b1", name: "Train", section: "Body", weight: 10 },
+  { id: "b2", name: "Fasted cardio (30 min)", section: "Body", weight: 5 },
+  { id: "b3", name: "Hit protein target", section: "Body", weight: 10 },
+  { id: "b4", name: "Stayed in calorie target", section: "Body", weight: 10 },
+  { id: "b5", name: "Daily supplements (AM)", section: "Body", weight: 3 },
+  { id: "b6", name: "Nightly supplements (PM)", section: "Body", weight: 3 },
+  { id: "b7", name: "Weighed in", section: "Body", weight: 2 },
+  { id: "c1", name: "Skincare \u2014 AM (cleanse + SPF)", section: "Care", weight: 5 },
+  { id: "c2", name: "Skincare \u2014 PM (tret/azelaic)", section: "Care", weight: 5 },
+  { id: "c3", name: "Oral minoxidil taken", section: "Care", weight: 5 },
+  { id: "c4", name: "Drank enough water", section: "Care", weight: 3 },
+  { id: "m1", name: "Phone out of room by 1AM", section: "Mind", weight: 15 },
+  { id: "m2", name: "20 min intentional learning", section: "Mind", weight: 10 },
+  { id: "m3", name: "Sat with boredom \u2014 no phone", section: "Mind", weight: 10 },
+  { id: "m4", name: "In bed by 1:30 / up by 9:30", section: "Mind", weight: 10 },
+  { id: "w1", name: "90 min deep work \u2014 no phone", section: "Work", weight: 15 },
+  { id: "w2", name: "Studied / coursework", section: "Work", weight: 10 },
+  { id: "s1", name: "Reached out to one person", section: "Social", weight: 15 },
+];
+
+const todayKey = (d = new Date()) => d.toISOString().slice(0, 10);
+const startOfWeek = (d) => {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7;
+  x.setDate(x.getDate() - day);
+  x.setHours(0, 0, 0, 0);
+  return x;
+};
+
+export default function Ascension() {
+  const [habits, setHabits] = useState(DEFAULT_HABITS);
+  const [log, setLog] = useState({});
+  const [why, setWhy] = useState("");
+  const [includeWeekends, setIncludeWeekends] = useState(false);
+  const [view, setView] = useState("today");
+  const [editing, setEditing] = useState(false);
+  const [celebrate, setCelebrate] = useState(null);
+
+  useEffect(() => {
+    try {
+      const raw = window.__ascension_v2;
+      if (raw) {
+        const s = JSON.parse(raw);
+        setHabits(s.habits && s.habits.length ? s.habits : DEFAULT_HABITS);
+        setLog(s.log || {});
+        setWhy(s.why || "");
+        setIncludeWeekends(!!s.includeWeekends);
+      }
+    } catch (e) {}
+  }, []);
+  useEffect(() => {
+    window.__ascension_v2 = JSON.stringify({ habits, log, why, includeWeekends });
+  }, [habits, log, why, includeWeekends]);
+
+  const tk = todayKey();
+  const today = log[tk] || {};
+  const maxDay = useMemo(() => habits.reduce((s, h) => s + h.weight, 0), [habits]);
+  const dayScore = habits.reduce((s, h) => s + (today[h.id] ? h.weight : 0), 0);
+  const dayPct = maxDay ? Math.round((dayScore / maxDay) * 100) : 0;
+
+  const toggle = (id) => {
+    setLog((prev) => {
+      const day = { ...(prev[tk] || {}) };
+      day[id] = !day[id];
+      const next = { ...prev, [tk]: day };
+      const sc = habits.reduce((s, h) => s + (day[h.id] ? h.weight : 0), 0);
+      if (maxDay && sc === maxDay) setTimeout(() => setCelebrate("day"), 150);
+      return next;
+    });
+  };
+
+  const weekDays = useMemo(() => {
+    const start = startOfWeek(new Date());
+    const days = [];
+    const count = includeWeekends ? 7 : 5;
+    for (let i = 0; i < count; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      days.push(todayKey(d));
+    }
+    return days;
+  }, [includeWeekends]);
+
+  const weekScore = weekDays.reduce((sum, k) => {
+    const day = log[k] || {};
+    return sum + habits.reduce((s, h) => s + (day[h.id] ? h.weight : 0), 0);
+  }, 0);
+  const weekMax = weekDays.length * maxDay;
+  const weekPct = weekMax ? Math.round((weekScore / weekMax) * 100) : 0;
+
+  const monthKeys = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const days = new Date(y, m + 1, 0).getDate();
+    return [...Array(days)].map((_, i) => todayKey(new Date(y, m, i + 1)));
+  }, []);
+  const monthScore = monthKeys.reduce((sum, k) => {
+    const day = log[k] || {};
+    return sum + habits.reduce((s, h) => s + (day[h.id] ? h.weight : 0), 0);
+  }, 0);
+  const monthActiveDays = monthKeys.filter((k) => log[k]).length;
+
+  const streak = useMemo(() => {
+    let s = 0;
+    const d = new Date();
+    while (true) {
+      const k = todayKey(d);
+      const day = log[k];
+      if (!day) break;
+      const sc = habits.reduce((a, h) => a + (day[h.id] ? h.weight : 0), 0);
+      if (maxDay && sc / maxDay >= 0.6) { s++; d.setDate(d.getDate() - 1); }
+      else break;
+    }
+    return s;
+  }, [log, habits, maxDay]);
+
+  const sections = Object.keys(SECTION_META).filter((sec) => habits.some((h) => h.section === sec));
+
+  return (
+    <div style={S.root}>
+      <style>{CSS}</style>
+      <div style={S.frame}>
+        {celebrate && <Celebration type={celebrate} onClose={() => setCelebrate(null)} />}
+
+        <header style={S.header}>
+          <div>
+            <div style={S.eyebrow}>NO LONGER JUST SURVIVING</div>
+            <h1 style={S.title}>ASCENSION</h1>
+          </div>
+          <div style={S.streakBox}>
+            <div style={S.streakFlame}>{"\uD83D\uDD25"}</div>
+            <div>
+              <div style={S.streakNum}>{streak}</div>
+              <div style={S.streakLbl}>day streak</div>
+            </div>
+          </div>
+        </header>
+
+        <div style={S.tabs}>
+          {[["today", "Today"], ["scores", "Scores"], ["why", "Why"]].map(([t, label]) => (
+            <button key={t} onClick={() => setView(t)} style={{ ...S.tab, ...(view === t ? S.tabActive : {}) }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {view === "today" && (
+          <>
+            <div style={S.dayMeter}>
+              <div style={S.dayMeterTop}>
+                <span>TODAY {"\u00B7"} {dayScore}/{maxDay} XP</span>
+                <span style={{ color: "#E8B04B", fontWeight: 700 }}>{dayPct}%</span>
+              </div>
+              <div style={S.track}>
+                <div style={{ ...S.fill, width: dayPct + "%", background: dayPct >= 100 ? "linear-gradient(90deg,#8FB996,#E8B04B)" : "linear-gradient(90deg,#A8743F,#E8B04B)" }} />
+              </div>
+            </div>
+
+            <div style={S.editRow}>
+              <button style={S.editBtn} onClick={() => setEditing((e) => !e)}>
+                {editing ? "Done editing" : "\u270E Edit habits & XP"}
+              </button>
+            </div>
+
+            {editing ? (
+              <Editor habits={habits} setHabits={setHabits} />
+            ) : (
+              sections.map((sec) => {
+                const items = habits.filter((h) => h.section === sec);
+                const c = SECTION_META[sec].color;
+                const secMax = items.reduce((s, h) => s + h.weight, 0);
+                const secScore = items.reduce((s, h) => s + (today[h.id] ? h.weight : 0), 0);
+                const allDone = items.every((h) => today[h.id]);
+                return (
+                  <div key={sec} style={S.section}>
+                    <div style={S.secHead}>
+                      <span style={{ ...S.secDot, background: c }} />
+                      <span style={S.secTitle}>{SECTION_META[sec].label}</span>
+                      <span style={S.secScore}>{allDone ? "\u2713 " : ""}{secScore}/{secMax}</span>
+                    </div>
+                    <div style={S.list}>
+                      {items.map((h) => {
+                        const done = !!today[h.id];
+                        return (
+                          <button key={h.id} onClick={() => toggle(h.id)} style={{ ...S.habit, ...(done ? S.habitDone : {}) }}>
+                            <span style={{ ...S.check, borderColor: c, background: done ? c : "transparent" }}>{done ? "\u2713" : ""}</span>
+                            <span style={{ ...S.habitName, opacity: done ? 0.5 : 1, textDecoration: done ? "line-through" : "none" }}>{h.name}</span>
+                            <span style={S.pts}>+{h.weight}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </>
+        )}
+
+        {view === "scores" && (
+          <div>
+            <ScoreCard title="THIS WEEK" pct={weekPct} detail={weekScore + " / " + weekMax + " XP \u00B7 " + weekDays.length + " days"} />
+            <div style={S.weekendRow}>
+              <span style={S.weekendLbl}>Count weekends</span>
+              <button onClick={() => setIncludeWeekends((v) => !v)} style={{ ...S.switch, background: includeWeekends ? "#E8B04B" : "#2a2620" }}>
+                <span style={{ ...S.knob, transform: includeWeekends ? "translateX(20px)" : "translateX(0)" }} />
+              </button>
+            </div>
+
+            <div style={{ height: 16 }} />
+            <ScoreCard title="THIS MONTH" pct={monthActiveDays ? Math.round((monthScore / (monthActiveDays * maxDay)) * 100) : 0} detail={monthScore + " XP \u00B7 " + monthActiveDays + " active days"} />
+
+            <div style={S.heatWrap}>
+              <div style={S.heatTitle}>THIS MONTH AT A GLANCE</div>
+              <div style={S.heatGrid}>
+                {monthKeys.map((k) => {
+                  const day = log[k] || {};
+                  const sc = habits.reduce((s, h) => s + (day[h.id] ? h.weight : 0), 0);
+                  const pct = maxDay ? sc / maxDay : 0;
+                  const isToday = k === tk;
+                  return (
+                    <div key={k} title={k} style={{ ...S.heatCell, border: isToday ? "1px solid #E8B04B" : "1px solid transparent", background: pct === 0 ? "#1a1816" : pct < 0.4 ? "#5a3a2a" : pct < 0.8 ? "#A8743F" : "#E8B04B" }} />
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {view === "why" && (
+          <div style={S.whyWrap}>
+            <div style={S.contract}>
+              <div style={S.contractLabel}>WHY I'M DOING THIS</div>
+              <textarea style={S.textarea} value={why} onChange={(e) => setWhy(e.target.value)} placeholder="The real reason. Read it on the days you don't feel like it." rows={4} />
+            </div>
+            <div style={S.creed}>
+              <p style={S.creedLine}>You've used tools to get here. You still showed up every day. <b>The discipline was always yours</b> — a tool can't hold a streak for you.</p>
+              <p style={S.creedLine}>You refuse to be average. Average is built one skipped day at a time — and so is unrecognizable. Same currency, different direction.</p>
+              <p style={S.creedLine}>Surviving {"\u2192"} Showing Up {"\u2192"} Locked In {"\u2192"} Dangerous {"\u2192"} Living. Every checkbox moves you one step.</p>
+            </div>
+          </div>
+        )}
+
+        <footer style={S.footer}>One day or day one. You know which one you're on.</footer>
+      </div>
+    </div>
+  );
+}
+
+function ScoreCard({ title, pct, detail }) {
+  return (
+    <div style={S.scoreCard}>
+      <div style={S.scoreTop}>
+        <span style={S.scoreTitle}>{title}</span>
+        <span style={S.scorePct}>{pct}%</span>
+      </div>
+      <div style={S.track}><div style={{ ...S.fill, width: pct + "%" }} /></div>
+      <div style={S.scoreDetail}>{detail}</div>
+    </div>
+  );
+}
+
+function Editor({ habits, setHabits }) {
+  const [name, setName] = useState("");
+  const [section, setSection] = useState("Body");
+  const [weight, setWeight] = useState(5);
+  const add = () => {
+    if (!name.trim()) return;
+    setHabits([...habits, { id: "x" + Date.now(), name: name.trim(), section, weight: Number(weight) || 1 }]);
+    setName(""); setWeight(5);
+  };
+  const remove = (id) => setHabits(habits.filter((h) => h.id !== id));
+  const setW = (id, w) => setHabits(habits.map((h) => (h.id === id ? { ...h, weight: Math.max(1, Number(w) || 1) } : h)));
+  return (
+    <div style={S.editor}>
+      <div style={S.addBox}>
+        <input style={S.editInput} placeholder="New habit…" value={name} onChange={(e) => setName(e.target.value)} />
+        <div style={S.addRow}>
+          <select style={S.select} value={section} onChange={(e) => setSection(e.target.value)}>
+            {Object.keys(SECTION_META).map((s) => <option key={s} value={s}>{SECTION_META[s].label}</option>)}
+          </select>
+          <input style={S.weightInput} type="number" min={1} value={weight} onChange={(e) => setWeight(e.target.value)} />
+          <button style={S.addBtn} onClick={add}>Add</button>
+        </div>
+      </div>
+      {habits.map((h) => (
+        <div key={h.id} style={S.editItem}>
+          <span style={{ ...S.secDot, background: SECTION_META[h.section].color }} />
+          <span style={S.editName}>{h.name}</span>
+          <input style={S.weightInputSm} type="number" min={1} value={h.weight} onChange={(e) => setW(h.id, e.target.value)} />
+          <button style={S.delBtn} onClick={() => remove(h.id)}>{"\u2715"}</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Celebration({ type, onClose }) {
+  const msg = {
+    day: ["PERFECT DAY", "Every box. That's who you're becoming."],
+    week: ["WEEK COMPLETE", "Five days locked in. Dangerous."],
+    month: ["MONTH COMPLETE", "Unrecognizable from where you started."],
+  }[type];
+  return (
+    <div style={S.celebrate} onClick={onClose}>
+      <div style={S.celebInner}>
+        <div style={S.celebGlow}>{"\u2605"}</div>
+        <div style={S.celebTitle}>{msg[0]}</div>
+        <div style={S.celebSub}>{msg[1]}</div>
+        <button style={S.celebBtn} onClick={onClose}>Keep going</button>
+      </div>
+    </div>
+  );
+}
+
+const S = {
+  root: { minHeight: "100vh", background: "radial-gradient(circle at 50% 0%, #161310 0%, #0c0b0a 60%)", color: "#EDE6DA", fontFamily: "'Inter', -apple-system, system-ui, sans-serif", padding: "20px 14px 40px", display: "flex", justifyContent: "center" },
+  frame: { width: "100%", maxWidth: 520, position: "relative" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 22 },
+  eyebrow: { fontSize: 10, letterSpacing: 3, color: "#7a6f5c", fontWeight: 600, marginBottom: 6 },
+  title: { fontSize: 32, fontWeight: 800, letterSpacing: 4, margin: 0, fontFamily: "'Georgia', serif", background: "linear-gradient(180deg,#F4E4C1,#C9A34E)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
+  streakBox: { display: "flex", alignItems: "center", gap: 8, background: "#141210", border: "1px solid #2a2620", borderRadius: 12, padding: "8px 14px" },
+  streakFlame: { fontSize: 20 },
+  streakNum: { fontSize: 20, fontWeight: 800, color: "#E8B04B", lineHeight: 1, fontFamily: "'Georgia',serif" },
+  streakLbl: { fontSize: 9, color: "#7a7268", letterSpacing: 1 },
+  tabs: { display: "flex", gap: 6, marginBottom: 20, background: "#141210", padding: 5, borderRadius: 12 },
+  tab: { flex: 1, padding: "10px 0", background: "transparent", border: "none", color: "#7a7268", fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: "pointer", fontFamily: "inherit" },
+  tabActive: { background: "#26221c", color: "#EDE6DA" },
+  dayMeter: { marginBottom: 14 },
+  dayMeterTop: { display: "flex", justifyContent: "space-between", fontSize: 11, letterSpacing: 1, color: "#9a9285", marginBottom: 8, fontWeight: 600 },
+  track: { height: 7, background: "#1c1a17", borderRadius: 99, overflow: "hidden" },
+  fill: { height: "100%", background: "linear-gradient(90deg,#A8743F,#E8B04B)", borderRadius: 99, transition: "width .4s ease" },
+  editRow: { display: "flex", justifyContent: "flex-end", marginBottom: 14 },
+  editBtn: { background: "transparent", border: "1px solid #2a2620", color: "#9a9285", fontSize: 12, padding: "7px 12px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit" },
+  section: { marginBottom: 22 },
+  secHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 },
+  secDot: { width: 8, height: 8, borderRadius: 99, flexShrink: 0 },
+  secTitle: { fontSize: 12, fontWeight: 700, letterSpacing: 2, color: "#C8BFB0", textTransform: "uppercase", flex: 1 },
+  secScore: { fontSize: 12, color: "#7a7268", fontWeight: 600 },
+  list: { display: "flex", flexDirection: "column", gap: 8 },
+  habit: { display: "flex", alignItems: "center", gap: 12, padding: "13px 14px", background: "#141210", border: "1px solid #221f1a", borderRadius: 12, cursor: "pointer", transition: "all .2s", fontFamily: "inherit" },
+  habitDone: { background: "#100f0d", borderColor: "#2a2620" },
+  check: { width: 22, height: 22, borderRadius: 7, border: "2px solid", display: "flex", alignItems: "center", justifyContent: "center", color: "#0c0b0a", fontWeight: 900, fontSize: 13, flexShrink: 0 },
+  habitName: { fontSize: 14, fontWeight: 500, color: "#EDE6DA", flex: 1, textAlign: "left", lineHeight: 1.3 },
+  pts: { fontSize: 12, fontWeight: 700, color: "#5a5448" },
+  scoreCard: { background: "#141210", border: "1px solid #221f1a", borderRadius: 14, padding: 18 },
+  scoreTop: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 },
+  scoreTitle: { fontSize: 12, letterSpacing: 2, color: "#9a9285", fontWeight: 700 },
+  scorePct: { fontSize: 26, fontWeight: 800, color: "#E8B04B", fontFamily: "'Georgia',serif" },
+  scoreDetail: { fontSize: 12, color: "#7a7268", marginTop: 10 },
+  weekendRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 4px 0" },
+  weekendLbl: { fontSize: 13, color: "#9a9285" },
+  switch: { width: 44, height: 24, borderRadius: 99, border: "none", cursor: "pointer", padding: 2, transition: "background .2s" },
+  knob: { display: "block", width: 20, height: 20, borderRadius: 99, background: "#0c0b0a", transition: "transform .2s" },
+  heatWrap: { marginTop: 24 },
+  heatTitle: { fontSize: 11, letterSpacing: 2, color: "#7a7268", marginBottom: 12 },
+  heatGrid: { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 },
+  heatCell: { aspectRatio: "1", borderRadius: 6, transition: "background .3s" },
+  whyWrap: { display: "flex", flexDirection: "column", gap: 20 },
+  contract: { background: "#141210", border: "1px solid #2a2620", borderRadius: 14, padding: 18 },
+  contractLabel: { fontSize: 10, letterSpacing: 2, color: "#7a6f5c", fontWeight: 700, marginBottom: 10 },
+  textarea: { width: "100%", background: "#0c0b0a", border: "1px solid #2a2620", borderRadius: 10, padding: "12px 14px", color: "#EDE6DA", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", outline: "none", resize: "vertical", lineHeight: 1.5 },
+  creed: { borderLeft: "3px solid #E8B04B", paddingLeft: 16 },
+  creedLine: { fontSize: 14, lineHeight: 1.6, color: "#C8BFB0", margin: "0 0 12px" },
+  editor: { display: "flex", flexDirection: "column", gap: 8 },
+  addBox: { background: "#141210", border: "1px solid #2a2620", borderRadius: 12, padding: 12, marginBottom: 8 },
+  editInput: { width: "100%", background: "#0c0b0a", border: "1px solid #2a2620", borderRadius: 8, padding: "10px 12px", color: "#EDE6DA", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", outline: "none", marginBottom: 8 },
+  addRow: { display: "flex", gap: 8 },
+  select: { flex: 1, background: "#0c0b0a", border: "1px solid #2a2620", borderRadius: 8, padding: "9px 10px", color: "#EDE6DA", fontSize: 13, fontFamily: "inherit", outline: "none" },
+  weightInput: { width: 60, background: "#0c0b0a", border: "1px solid #2a2620", borderRadius: 8, padding: "9px 10px", color: "#EDE6DA", fontSize: 13, fontFamily: "inherit", outline: "none", textAlign: "center" },
+  addBtn: { background: "#E8B04B", border: "none", borderRadius: 8, padding: "9px 16px", color: "#0c0b0a", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" },
+  editItem: { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#141210", border: "1px solid #221f1a", borderRadius: 10 },
+  editName: { flex: 1, fontSize: 13, color: "#C8BFB0" },
+  weightInputSm: { width: 48, background: "#0c0b0a", border: "1px solid #2a2620", borderRadius: 6, padding: "5px 6px", color: "#E8B04B", fontSize: 13, fontWeight: 700, fontFamily: "inherit", outline: "none", textAlign: "center" },
+  delBtn: { background: "transparent", border: "none", color: "#5a5448", fontSize: 16, cursor: "pointer", padding: "0 4px" },
+  celebrate: { position: "fixed", inset: 0, background: "rgba(8,7,6,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, animation: "fade .3s ease" },
+  celebInner: { textAlign: "center", padding: 30 },
+  celebGlow: { fontSize: 56, color: "#E8B04B", animation: "pop .5s ease", filter: "drop-shadow(0 0 20px rgba(232,176,75,0.6))" },
+  celebTitle: { fontSize: 30, fontWeight: 800, letterSpacing: 4, margin: "16px 0 8px", fontFamily: "'Georgia',serif", background: "linear-gradient(180deg,#F4E4C1,#C9A34E)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
+  celebSub: { fontSize: 15, color: "#C8BFB0", marginBottom: 24 },
+  celebBtn: { background: "#E8B04B", border: "none", borderRadius: 10, padding: "12px 28px", color: "#0c0b0a", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" },
+  footer: { textAlign: "center", fontSize: 12, color: "#5a5448", marginTop: 30, fontStyle: "italic", fontFamily: "'Georgia',serif" },
+};
+
+const CSS = "* { -webkit-tap-highlight-color: transparent; box-sizing: border-box; } button:active { transform: scale(0.98); } input::placeholder, textarea::placeholder { color: #5a5448; } @keyframes fade { from { opacity: 0; } to { opacity: 1; } } @keyframes pop { 0% { transform: scale(0); } 70% { transform: scale(1.2); } 100% { transform: scale(1); } }";
